@@ -20,6 +20,16 @@ assert.deepStrictEqual(r("learn"), ["meta-learning", "machine learning"]);
 assert.deepStrictEqual(r("top"), ["topology"]);
 assert.deepStrictEqual(r("zzz"), []);
 
+// --- word starts: acronyms beat tighter mid-word matches ---
+const ACRO = ["nonlinear programming", "natural language processing"];
+assert.deepStrictEqual(rank("nlp", ACRO), ["natural language processing", "nonlinear programming"]);
+assert.ok(score("nlp", "natural language processing") < score("nlp", "nonlinear programming"),
+	"every char at a word start beats a shorter but mid-word match");
+
+// --- starting at a word boundary is free; starting mid-word is not ---
+assert.ok(score("learn", "machine learning") < score("learn", "unlearning"), "word-start beats mid-word start");
+assert.strictEqual(score("ml", "ml"), 0.02, "exact match costs only its length");
+
 // --- case-insensitive (caller lowercases the query) ---
 assert.deepStrictEqual(r("mlops"), ["ML ops"]);
 

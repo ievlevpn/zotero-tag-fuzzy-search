@@ -18,22 +18,46 @@ function norm(s) {
 	return f ? f(s) : s.toLowerCase(); // plain lowercase under node (test.js)
 }
 
+// What counts as the start of a word inside a tag.
+const SEP = /[\s\-_/.,:;&()]/;
+const SEPS = new RegExp(SEP.source + "+");
+
+// First letter of each word: "natural language processing" -> "nlp".
+function initials(name) {
+	return name.split(SEPS).filter(Boolean).map((w) => w[0]).join("");
+}
+
 // Fuzzy score: every char of `q` must appear in `name` in order (both already
-// normalized by norm()). Returns null for no match, else a number — LOWER is better:
-// an earlier start, fewer gaps and a tighter span win, length breaks ties.
-// ponytail: greedy leftmost match, not an optimal alignment. Swap in a real
-// Smith-Waterman if the ranking ever feels wrong on long tags.
+// normalized by norm()). Returns null for no match, else a number — LOWER is
+// better. Jumping to the start of a word is nearly free, so "nlp" prefers
+// "natural language processing" over "nonlinear programming"; jumping into the
+// middle of one costs, and more so the further it skips. Starting at a word
+// boundary is free too, so "learn" likes "machine learning". Length breaks ties.
+// ponytail: greedy leftmost match, not an optimal alignment — it takes the first
+// occurrence of each char, so a better-aligned match later in the tag still
+// scores as the earlier sloppy one. Swap in Smith-Waterman if that ever shows.
 function score(q, name) {
-	let i = 0, first = -1, prev = -1, gaps = 0;
+	let i = 0, first = -1, prev = -1, cost = 0;
 	for (let j = 0; j < name.length && i < q.length; j++) {
 		if (name[j] !== q[i]) continue;
 		if (first < 0) first = j;
-		else if (j !== prev + 1) gaps++;
+		else if (j !== prev + 1) {
+			cost += SEP.test(name[j - 1]) ? 1 : 4 + (j - prev - 1);
+		}
 		prev = j;
 		i++;
 	}
 	if (i < q.length) return null;
-	return first + 4 * gaps + (prev - first + 1 - q.length) + name.length / 100;
+	// first <= 0 also covers the empty query (first stays -1).
+	const start = first <= 0 || SEP.test(name[first - 1]) ? 0 : first;
+	const sub = start + cost + name.length / 100;
+	// Acronyms, which the greedy scan above misses whenever an earlier word
+	// contains the letter — it spends the "l" of "nlp" on "natura(l)" and never
+	// reaches "language". Scored just below a real prefix match, far above any
+	// gappy one. Single letters are left to the scan; every tag has initials.
+	return q.length > 1 && initials(name).startsWith(q)
+		? Math.min(sub, 0.5 + name.length / 100)
+		: sub;
 }
 
 // `q` normalized by the caller; empty q keeps Zotero's plain alphabetical list.
@@ -86,6 +110,11 @@ async function fuzzyStartSearch(searchString, searchParams, previousResult, list
 	try {
 		const params = JSON.parse(searchParams);
 		const tags = await candidateTags(params);
+		// One search object serves every tag field, so a fast typist can start a
+		// newer search while this query is still running. Its startSearch has
+		// already swapped in a fresh _result — bail rather than fill that one
+		// with our stale suggestions.
+		if (this._result !== result) return;
 		this.updateResults(rank(norm(searchString.trim()), tags), [], false);
 	}
 	catch (e) {
