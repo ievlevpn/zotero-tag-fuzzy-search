@@ -10,7 +10,7 @@ assert.ok(score("lear", "machine learning") !== null, "matches mid-string");
 assert.ok(score("mchlrn", "machine learning") !== null, "matches scattered chars");
 assert.strictEqual(score("xyz", "machine learning"), null, "no match");
 assert.strictEqual(score("nam", "machine"), null, "order matters");
-assert.strictEqual(score("", "anything"), 0.08, "empty query matches at cost 0");
+assert.strictEqual(score("", "anything"), 0, "empty query matches at no cost");
 
 // --- ranking: exact/prefix beats scattered; fewer gaps beats more ---
 assert.ok(score("ml", "ml") < score("ml", "machine learning"), "tight beats scattered");
@@ -32,6 +32,16 @@ assert.strictEqual(score("ml", "ml"), 0.02, "exact match costs only its length")
 
 // --- case-insensitive (caller lowercases the query) ---
 assert.deepStrictEqual(r("mlops"), ["ML ops"]);
+
+// --- multi-word: every word must match, in any order ---
+assert.ok(score("learn machine", "machine learning") !== null, "words out of order still match");
+assert.strictEqual(score("learn machine", "machine learning"), score("machine learn", "machine learning"),
+	"word order does not change the score");
+assert.strictEqual(score("learn topology", "machine learning"), null, "every word must match");
+assert.deepStrictEqual(r("learn ml"), ["meta-learning", "machine learning"]);
+assert.ok(score("mach lear", "machine learning") < score("mach lear", "machine relearning"),
+	"per-word matching stops charging for the jump between words");
+assert.strictEqual(score(" ml ", "ml"), score("ml", "ml"), "stray whitespace is ignored");
 
 // --- empty query: alphabetical passthrough, capped ---
 assert.deepStrictEqual(rank("", TAGS), TAGS);

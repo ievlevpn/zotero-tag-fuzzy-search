@@ -2,8 +2,9 @@
 
 Zotero's tag autocomplete only matches the **start** of a tag: typing `learn`
 never suggests `machine learning`. This plugin makes it fuzzy — every character
-you type just has to appear in order — and sorts the suggestions best-first
-(tight, early matches on short tags win).
+you type just has to appear in order — and sorts the suggestions best-first.
+Word starts count for a lot, so `nlp` finds `natural language processing`, and
+each word of the query is matched on its own, so `learn machine` finds it too.
 
 It works everywhere tags are added, because they all share one autocomplete
 implementation:
@@ -57,4 +58,5 @@ Both patches are undone on shutdown.
   milliseconds for a normal library; a huge one may want a cache.
 - Matching is a subsequence over Zotero's own `normalizeForSearch` (so it is
   case- and accent-insensitive), but there is no transliteration or typo
-  tolerance: the characters have to be there, in order.
+  tolerance: within each word of the query, the characters have to be there, in
+  order. The query's words themselves may come in any order.

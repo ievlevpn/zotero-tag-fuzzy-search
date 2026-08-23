@@ -27,19 +27,19 @@ function initials(name) {
 	return name.split(SEPS).filter(Boolean).map((w) => w[0]).join("");
 }
 
-// Fuzzy score: every char of `q` must appear in `name` in order (both already
-// normalized by norm()). Returns null for no match, else a number — LOWER is
-// better. Jumping to the start of a word is nearly free, so "nlp" prefers
+// Fuzzy score for one word: every char of `w` must appear in `name` in order
+// (both already normalized by norm()). Returns null for no match, else a number
+// — LOWER is better. Jumping to the start of a word is nearly free, so "nlp" prefers
 // "natural language processing" over "nonlinear programming"; jumping into the
 // middle of one costs, and more so the further it skips. Starting at a word
 // boundary is free too, so "learn" likes "machine learning". Length breaks ties.
 // ponytail: greedy leftmost match, not an optimal alignment — it takes the first
 // occurrence of each char, so a better-aligned match later in the tag still
 // scores as the earlier sloppy one. Swap in Smith-Waterman if that ever shows.
-function score(q, name) {
+function wordScore(w, name) {
 	let i = 0, first = -1, prev = -1, cost = 0;
-	for (let j = 0; j < name.length && i < q.length; j++) {
-		if (name[j] !== q[i]) continue;
+	for (let j = 0; j < name.length && i < w.length; j++) {
+		if (name[j] !== w[i]) continue;
 		if (first < 0) first = j;
 		else if (j !== prev + 1) {
 			cost += SEP.test(name[j - 1]) ? 1 : 4 + (j - prev - 1);
@@ -47,7 +47,7 @@ function score(q, name) {
 		prev = j;
 		i++;
 	}
-	if (i < q.length) return null;
+	if (i < w.length) return null;
 	// first <= 0 also covers the empty query (first stays -1).
 	const start = first <= 0 || SEP.test(name[first - 1]) ? 0 : first;
 	const sub = start + cost + name.length / 100;
@@ -55,9 +55,25 @@ function score(q, name) {
 	// contains the letter — it spends the "l" of "nlp" on "natura(l)" and never
 	// reaches "language". Scored just below a real prefix match, far above any
 	// gappy one. Single letters are left to the scan; every tag has initials.
-	return q.length > 1 && initials(name).startsWith(q)
+	return w.length > 1 && initials(name).startsWith(w)
 		? Math.min(sub, 0.5 + name.length / 100)
 		: sub;
+}
+
+// Every word of the query has to match, but in any order, so "learn machine"
+// finds "machine learning". Costs add, so the name that matches every word
+// tightly wins. A one-word query is just wordScore().
+// ponytail: two words can be satisfied by the same stretch of the name ("ml ml"
+// matches "ml"). Nobody types that; dedupe the matched ranges if they ever do.
+function score(q, name) {
+	let sum = 0;
+	for (const w of q.split(/\s+/)) {
+		if (!w) continue;
+		const s = wordScore(w, name);
+		if (s === null) return null;
+		sum += s;
+	}
+	return sum;
 }
 
 // `q` normalized by the caller; empty q keeps Zotero's plain alphabetical list.
