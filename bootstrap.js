@@ -115,31 +115,42 @@ async function candidateTags(params) {
 // only. Sets up the same instance state the module's updateResults() expects.
 async function fuzzyStartSearch(searchString, searchParams, previousResult, listener) {
 	const { classes: Cc, interfaces: Ci } = Components;
-	const result = Cc["@mozilla.org/autocomplete/simple-result;1"]
-		.createInstance(Ci.nsIAutoCompleteSimpleResult);
-	result.setSearchString(searchString);
-	this._result = result;
-	this._results = [];
-	this._listener = listener;
-	this._cancelled = false;
-
+	let result;
 	try {
+		result = Cc["@mozilla.org/autocomplete/simple-result;1"]
+			.createInstance(Ci.nsIAutoCompleteSimpleResult);
+		result.setSearchString(searchString);
+		this._result = result;
+		this._results = [];
+		this._listener = listener;
+		this._cancelled = false;
+
 		const params = JSON.parse(searchParams);
 		const tags = await candidateTags(params);
 		// One search object serves every tag field, so a fast typist can start a
 		// newer search while this query is still running. Its startSearch has
 		// already swapped in a fresh _result — bail rather than fill that one
-		// with our stale suggestions.
-		if (this._result !== result) return;
+		// with our stale suggestions. stopSearch() sets _cancelled the same way
+		// when the popup is dismissed mid-query.
+		if (this._result !== result || this._cancelled) return;
 		this.updateResults(rank(norm(searchString.trim()), tags), [], false);
 	}
 	catch (e) {
 		Zotero.logError(e);
-		this.updateResults(null, null, false, Ci.nsIAutoCompleteResult.RESULT_FAILURE);
+		// Only report failure while our own result object is the live one —
+		// without it updateResults has nothing to append to.
+		if (result && this._result === result) {
+			this.updateResults(null, null, false, Ci.nsIAutoCompleteResult.RESULT_FAILURE);
+		}
 	}
 }
 
 // --- tag selector pane -----------------------------------------------------
+
+// Every main window runs the container script again and overwrites
+// Zotero.TagSelector with a fresh class, so there can be one patched class per
+// open window and shutdown has to undo all of them, not just the newest.
+const patchedSelectors = new Set();
 
 // The tag cloud in the bottom left does its own filtering, inside render():
 // `normalizeForSearch(tag.tag).includes(normalizedSearchString)`. Filter
@@ -150,14 +161,22 @@ async function fuzzyStartSearch(searchString, searchParams, previousResult, list
 // and ours is a constant "".
 function patchTagSelector() {
 	const cls = typeof Zotero !== "undefined" && Zotero.TagSelector;
-	if (!cls || cls.prototype.render.fuzzyOriginal) return;
-	const orig = cls.prototype.render;
+	if (!cls || patchedSelectors.has(cls)) return;
+	let orig = cls.prototype.render;
+	// A previous instance of the plugin may still be installed if its shutdown
+	// was interrupted. Unwrap it instead of stacking on top.
+	if (orig.fuzzyOriginal) orig = orig.fuzzyOriginal;
 	const patched = function () {
 		const q = norm((this.state.searchString || "").trim());
 		if (!q) return orig.call(this);
+		const matches = (name) => score(q, norm(name)) !== null;
 		const state = this.state;
 		this.state = Object.assign({}, state, {
-			tags: state.tags.filter((t) => score(q, norm(t.tag)) !== null),
+			tags: state.tags.filter((t) => matches(t.tag)),
+			// Colored tags missing from state.tags are injected straight from
+			// this map *after* our filter, so they have to be filtered here or
+			// they would survive every query.
+			tagColors: new Map([...state.tagColors].filter(([name]) => matches(name))),
 			searchString: "",
 		});
 		try { return orig.call(this); }
@@ -165,6 +184,18 @@ function patchTagSelector() {
 	};
 	patched.fuzzyOriginal = orig;
 	cls.prototype.render = patched;
+	patchedSelectors.add(cls);
+}
+
+function unpatchTagSelectors() {
+	for (const cls of patchedSelectors) {
+		try {
+			const render = cls.prototype.render;
+			if (render.fuzzyOriginal) cls.prototype.render = render.fuzzyOriginal;
+		}
+		catch (e) { /* that window is gone and its class died with it */ }
+	}
+	patchedSelectors.clear();
 }
 
 // --- plugin lifecycle ------------------------------------------------------
@@ -178,17 +209,22 @@ function startup() {
 	patchTagSelector();
 
 	const { ZoteroAutoComplete } = ChromeUtils.importESModule(AC_MODULE);
-	if (ZoteroAutoComplete.prototype.startSearch.fuzzyPatched) return;
-	original = ZoteroAutoComplete.prototype.startSearch;
+	// Same as above: unwrap a patch left behind by an interrupted shutdown, so
+	// an upgrade replaces the old version instead of silently keeping it.
+	const prev = ZoteroAutoComplete.prototype.startSearch;
+	const base = prev.fuzzyOriginal || prev;
+	original = base;
 
+	// Closes over `base`, not `original`, so an installed patch keeps working
+	// even after shutdown clears the module-level reference.
 	const patched = function (searchString, searchParams, previousResult, listener) {
 		let fieldName = "";
 		try { fieldName = (JSON.parse(searchParams) || {}).fieldName || ""; }
 		catch (e) { /* not ours; fall through to Zotero's own handling */ }
-		const fn = fieldName.split("-")[0] === "tag" ? fuzzyStartSearch : original;
+		const fn = fieldName.split("-")[0] === "tag" ? fuzzyStartSearch : base;
 		return fn.call(this, searchString, searchParams, previousResult, listener);
 	};
-	patched.fuzzyPatched = true;
+	patched.fuzzyOriginal = base;
 	ZoteroAutoComplete.prototype.startSearch = patched;
 }
 
@@ -197,13 +233,14 @@ function onMainWindowLoad() {
 }
 
 function shutdown() {
-	const cls = Zotero.TagSelector;
-	if (cls && cls.prototype.render.fuzzyOriginal) {
-		cls.prototype.render = cls.prototype.render.fuzzyOriginal;
+	// Autocomplete first: it is the patch that matters, and the tag selector
+	// classes below belong to windows that may already be gone, so touching one
+	// can throw ("can't access dead object") and strand this half undone.
+	if (original) {
+		ChromeUtils.importESModule(AC_MODULE).ZoteroAutoComplete.prototype.startSearch = original;
+		original = null;
 	}
-	if (!original) return;
-	ChromeUtils.importESModule(AC_MODULE).ZoteroAutoComplete.prototype.startSearch = original;
-	original = null;
+	unpatchTagSelectors();
 }
 
 function install() {}
