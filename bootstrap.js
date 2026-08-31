@@ -149,8 +149,21 @@ async function fuzzyStartSearch(searchString, searchParams, previousResult, list
 
 // Every main window runs the container script again and overwrites
 // Zotero.TagSelector with a fresh class, so there can be one patched class per
-// open window and shutdown has to undo all of them, not just the newest.
+// open window and shutdown has to undo all of them, not just the newest. Held
+// as WeakRefs: a strong reference here would keep a closed window's whole JS
+// realm alive for the rest of the session.
 const patchedSelectors = new Set();
+
+// Has this class already been patched? Prunes refs to windows that have since
+// closed. (Deleting from a Set while iterating it is safe.)
+function alreadyPatched(cls) {
+	for (const ref of patchedSelectors) {
+		const seen = ref.deref();
+		if (!seen) patchedSelectors.delete(ref);
+		else if (seen === cls) return true;
+	}
+	return false;
+}
 
 // The tag cloud in the bottom left does its own filtering, inside render():
 // `normalizeForSearch(tag.tag).includes(normalizedSearchString)`. Filter
@@ -161,7 +174,7 @@ const patchedSelectors = new Set();
 // and ours is a constant "".
 function patchTagSelector() {
 	const cls = typeof Zotero !== "undefined" && Zotero.TagSelector;
-	if (!cls || patchedSelectors.has(cls)) return;
+	if (!cls || alreadyPatched(cls)) return;
 	let orig = cls.prototype.render;
 	// A previous instance of the plugin may still be installed if its shutdown
 	// was interrupted. Unwrap it instead of stacking on top.
@@ -184,16 +197,18 @@ function patchTagSelector() {
 	};
 	patched.fuzzyOriginal = orig;
 	cls.prototype.render = patched;
-	patchedSelectors.add(cls);
+	patchedSelectors.add(new WeakRef(cls));
 }
 
 function unpatchTagSelectors() {
-	for (const cls of patchedSelectors) {
+	for (const ref of patchedSelectors) {
+		const cls = ref.deref();
+		if (!cls) continue; // window closed and its class was collected
 		try {
 			const render = cls.prototype.render;
 			if (render.fuzzyOriginal) cls.prototype.render = render.fuzzyOriginal;
 		}
-		catch (e) { /* that window is gone and its class died with it */ }
+		catch (e) { /* window gone but not yet collected; its class is dead */ }
 	}
 	patchedSelectors.clear();
 }
@@ -202,12 +217,18 @@ function unpatchTagSelectors() {
 
 let original = null; // pre-patch startSearch, restored on shutdown
 
-function startup() {
-	// Zotero.TagSelector is defined by a script in the main window, so it may not
-	// exist yet at startup; onMainWindowLoad catches that (and later windows,
-	// which each redefine the class).
-	patchTagSelector();
+// Both patches reach into Zotero internals, which a future release could rename
+// or move. Say so in the error log and leave Zotero's own behavior in place,
+// rather than throwing halfway through and leaving the plugin half-installed.
+function attempt(what, fn) {
+	try { fn(); }
+	catch (e) {
+		Zotero.logError(new Error(
+			`Tag Fuzzy Search: could not ${what} (${e}). Zotero's own tag search is unchanged.`));
+	}
+}
 
+function patchAutocomplete() {
 	const { ZoteroAutoComplete } = ChromeUtils.importESModule(AC_MODULE);
 	// Same as above: unwrap a patch left behind by an interrupted shutdown, so
 	// an upgrade replaces the old version instead of silently keeping it.
@@ -228,19 +249,30 @@ function startup() {
 	ZoteroAutoComplete.prototype.startSearch = patched;
 }
 
+function restoreAutocomplete() {
+	if (!original) return;
+	ChromeUtils.importESModule(AC_MODULE).ZoteroAutoComplete.prototype.startSearch = original;
+	original = null;
+}
+
+function startup() {
+	// Zotero.TagSelector is defined by a script in the main window, so it may not
+	// exist yet at startup; onMainWindowLoad catches that (and later windows,
+	// which each redefine the class).
+	attempt("patch the tag selector", patchTagSelector);
+	attempt("patch tag autocomplete", patchAutocomplete);
+}
+
 function onMainWindowLoad() {
-	patchTagSelector();
+	attempt("patch the tag selector", patchTagSelector);
 }
 
 function shutdown() {
 	// Autocomplete first: it is the patch that matters, and the tag selector
 	// classes below belong to windows that may already be gone, so touching one
 	// can throw ("can't access dead object") and strand this half undone.
-	if (original) {
-		ChromeUtils.importESModule(AC_MODULE).ZoteroAutoComplete.prototype.startSearch = original;
-		original = null;
-	}
-	unpatchTagSelectors();
+	attempt("restore tag autocomplete", restoreAutocomplete);
+	attempt("restore the tag selector", unpatchTagSelectors);
 }
 
 function install() {}
