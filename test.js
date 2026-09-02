@@ -43,6 +43,10 @@ assert.ok(score("mach lear", "machine learning") < score("mach lear", "machine r
 	"per-word matching stops charging for the jump between words");
 assert.strictEqual(score(" ml ", "ml"), score("ml", "ml"), "stray whitespace is ignored");
 
+// --- norm() is memoized: repeated queries must not drift ---
+assert.deepStrictEqual(r("ml"), r("ml"), "same query, same answer");
+assert.deepStrictEqual(rank("morse", ["Morse theory"]), ["Morse theory"], "cached normalization still folds case");
+
 // --- empty query: alphabetical passthrough, capped ---
 assert.deepStrictEqual(rank("", TAGS), TAGS);
 assert.strictEqual(rank("", Array.from({ length: 200 }, (_, i) => "t" + i)).length, 50);

@@ -13,9 +13,20 @@ const AC_MODULE = "chrome://zotero/content/zotero-autocomplete.mjs";
 const LIMIT = 50; // same cap Zotero's own query uses
 
 // Lowercase and fold accents exactly the way Zotero's own tag filter does.
+// Memoized: this runs over every tag on every keystroke and costs ~80% of the
+// matching time (NFKD + six regexes + NFC per tag). It is a pure function of
+// its input, so a cached answer can never go stale — no invalidation needed.
+// One entry per distinct string ever normalized; ~0.8 MB for a 10k-tag library.
+const normCache = new Map();
+
 function norm(s) {
-	const f = typeof Zotero !== "undefined" && Zotero.Utilities.Internal.normalizeForSearch;
-	return f ? f(s) : s.toLowerCase(); // plain lowercase under node (test.js)
+	let v = normCache.get(s);
+	if (v === undefined) {
+		const f = typeof Zotero !== "undefined" && Zotero.Utilities.Internal.normalizeForSearch;
+		v = f ? f(s) : s.toLowerCase(); // plain lowercase under node (test.js)
+		normCache.set(s, v);
+	}
+	return v;
 }
 
 // What counts as the start of a word inside a tag.
