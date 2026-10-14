@@ -3,12 +3,12 @@
     "tag-fuzzy-search@local": {
       "updates": [
         {
-          "version": "0.3.3",
-          "update_link": "https://github.com/ievlevpn/zotero-tag-fuzzy-search/releases/download/v0.3.3/tag-fuzzy-search.xpi",
+          "version": "0.3.4",
+          "update_link": "https://github.com/ievlevpn/zotero-tag-fuzzy-search/releases/download/v0.3.4/tag-fuzzy-search.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "6.999",
-              "strict_max_version": "10.0.*"
+              "strict_max_version": "11.*"
             }
           }
         }

@@ -1,7 +1,7 @@
 {
 	"manifest_version": 2,
 	"name": "Tag Fuzzy Search",
-	"version": "0.3.3",
+	"version": "0.3.4",
 	"description": "Makes tag autocomplete fuzzy everywhere tags are added — item pane, notes, and PDF annotations — instead of matching only the start of a tag.",
 	"homepage_url": "https://github.com/ievlevpn/zotero-tag-fuzzy-search",
 	"author": "Pavel Ievlev",
@@ -14,7 +14,7 @@
 			"id": "tag-fuzzy-search@local",
 			"update_url": "https://raw.githubusercontent.com/ievlevpn/zotero-tag-fuzzy-search/master/update.json",
 			"strict_min_version": "6.999",
-			"strict_max_version": "10.0.*"
+			"strict_max_version": "11.*"
 		}
 	}
 }
