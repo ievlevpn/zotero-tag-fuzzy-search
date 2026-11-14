@@ -21,11 +21,17 @@ fuzzily, not reordered — it stays alphabetical with colored tags pinned first.
 
 ## Install
 
-```sh
-zip -r tag-fuzzy-search.xpi manifest.json bootstrap.js
-```
+1. Download `tag-fuzzy-search.xpi` from the
+   [latest release](https://github.com/ievlevpn/zotero-tag-fuzzy-search/releases/latest)
+   (under **Assets** — not the "Source code" zip, which Zotero can't install).
+2. In Zotero: **Tools → Plugins → ⚙ → Install Plugin From File…** and pick the
+   file.
 
-Then in Zotero: **Tools → Plugins → gear icon → Install Plugin From File…**
+To build it yourself instead:
+
+```sh
+zip -r tag-fuzzy-search.xpi manifest.json bootstrap.js icon.svg
+```
 
 For live development, point Zotero at the folder instead of zipping: create a
 file named `tag-fuzzy-search@local` (the id from `manifest.json`) inside your
